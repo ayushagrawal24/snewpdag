@@ -10,71 +10,78 @@ SharpDropoff : Looks for a sharp drop in the signal, indicating a potential blac
 Input Arguments:
     in_xfield: (string) name of field to extract from alert data containing time bins
     in_yfield: (string) name of field to extract from alert data containing neutrino detection counts
+    
     [out_field]: (string, optional) name of field for dictionary output.
-    [t_check_width]: (int/float, optional) time difference in ms over which drop in luminosity is checked. Assumed to be evenly spaced
-    [threshold_drop]: (float, optional) 1 - minimum percentage drop in luminosity over dropWidth to flag as a BH candidate. Must be specified with dropWidth. (eg drop threshold from 100 to 3 over t_check_width would be 0.03)
+    [char_time]: (float, optional) characteristic time scale expected for the drop (in s)
+    [penalty]: (float, optional) Penalty (beta) parameter to use in PELT model
+    [thresh_drop]: (float, optional) Minimum required factor by which signal is required to drop 
     
 Output:
     has_sharp_drop: (bool) whether or not a sharp drop was detected
-    drop_times: (1d numpy array of ints) Time bin at which start of a sharp drop is seen. Ideally expect only a single drop
-    drop_diffs: (1d numpy array of floats) difference in neutrino count at drop
+    drop_time: (float) Time bin at which the start of the sharpest drop is seen.
+    max_drop: (float) Sharpest drop value
 
 """
 
 import logging
+import math
 import numpy as np
-import healpy as hp
+import ruptures as rpt
 from snewpdag.dag import Node
 
 class SharpDropoff(Node):
     
   #Constructor
-  def __init__(self, in_field, **kwargs):
+  def __init__(self, in_xfield, in_yfield, **kwargs):
+    self.found_dropoff = False
     self.tfield = in_xfield
     self.yfield = in_yfield
-    self.t_check_width = kwargs.pop('t_check_width', 10)
-    self.threshold_drop = kwargs.pop('threshold_drop', 0.1)
+    self.cpd = rpt.KernelCPD(kernel='linear')
+    self.char_time = kwargs.pop('char_time',0.0002)
+    self.cpd_penalty = kwargs.pop('penalty',100)      
+    self.thresh_drop = kwargs.pop('threshold_drop', 3) 
     self.out_field = kwargs.pop('out_field', None)
     super().__init__(**kwargs)
 
-  #
   def alert(self, data):
-    times = np.array(data[self.tfield])
-    vals = np.array(data[self.yfield])
+    times = data[self.tfield]
+    dt = times[1]-times[0]
+    vals = data[self.yfield]
+    log_vals = np.log2(vals)
 
-    #Finding indices of t+t_check_width for each t
-    #This is needed in case the width is not an integer multiple of the time bin spacing
-    #Can lead to an error of 1 in indices due to floating point error
-    ind = np.searchsorted(times, times + t_check_width, side='left')
-    last_ind = np.argmax(ind)
-    condition = vals[ind[:last_ind]] - vals[:last_ind] > self.threshold_drop
+    #Minimum segment size for change point detection
+    self.cpd.min_size = min(2, math.ceil(self.char_time/dt))
 
-    #If width guaranteed to be an integer multiple of bin spacing
-    ind_width = ceil((times[1]-times[0])/self.t_check_width)
-    condition = np.diff(vals, ind_width) > self.threshold_drop
-
-    #Report only the starting point of any detected drops
-    drop_ind = np.nonzero(condition)
-    drop_ind = drop_ind[np.insert(np.diff(condition) - 1 == 0, 0, True] 
-                                    
-    self.drop_times = times[drop_ind]
-    self.found_dropoff = bool(self.drop_times.size)
+#TODO: rescale input to a standard normalisation
+    #find changepoint indices and prepend start point 0
+    bkps = self.cpd.fit_predict(signal=log_vals, pen=self.cpd_penalty)
+    bkps = np.concatenate(([0],bkps))
     
-    return False
-
-  def reset(self, data):
-    return False
-
-  def revoke(self, data):
-    return False
-
-  def report(self, data):
+    log_means = np.zeros(bkps.size-1)
+    for i in range(bkps.size-1):
+      log_means[i] = log_vals[bkps[i]:bkps[i+1]].mean()
+      
+    self.drop_max = np.diff(log_means).max()
+    logging.info('Sharpest drop: {}'.format(self.drop_max))
+    
+    if self.drop_max <= -1*math.log2(self.thresh_drop):
+      self.drop_time = times[np.diff(log_means).argmax()]
+      self.found_dropoff = True
+      logging.info('Potential BH formation at time {}'.format(self.drop_time))
+    else:
+      logging.info('No BH candidate detected')
+    
+    logging.info('BH drop detected: {}'.format(self.found_dropoff))
+      
     d = {
           "has_sharp_drop": self.found_dropoff,
-          "drop_times": self.drop_times,
+          "drop_time": self.drop_time,
+          "max_drop": 2**self.drop_max
         }
+    
     if self.out_field == None:
       data.update(d)
     else:
       data[self.out_field] = d
+    
     return True
