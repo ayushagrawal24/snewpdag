@@ -37,7 +37,7 @@ class SharpDropoff(Node):
     
     self.char_time = kwargs.pop('char_time',0.0002)
     self.cpd_penalty = kwargs.pop('penalty',0.6)      
-    self.thresh_drop = kwargs.pop('threshold_drop', 3) 
+    self.thresh_drop = kwargs.pop('threshold_drop', 1.7) 
     self.out_field = kwargs.pop('out_field', None)
     super().__init__(**kwargs)
     
@@ -58,22 +58,25 @@ class SharpDropoff(Node):
     #find changepoint indices and prepend start point 0
     bkps = self.cpd.fit_predict(signal=log_vals, pen=self.cpd_penalty)
     bkps = np.concatenate(([0],bkps))
-    
-    logging.info('bkp times: {}'.format(times[bkps[:-1]]))
+    bkp_times = times[bkps[:-1]]
+    logging.info('bkp_times: {}'.format(bkp_times))
     
     log_means = np.zeros(bkps.size-1)
+    std_dev = np.zeros(bkps.size-1)
     for i in range(bkps.size-1):
       log_means[i] = log_vals[bkps[i]:bkps[i+1]].mean()
+      std_dev[i] = np.exp2(log_vals[bkps[i]:bkps[i+1]]).std()
       
     logging.info('means: {}'.format(np.exp2(log_means)))
+    logging.info('std_dev: {}'.format(std_dev))
       
-    self.drop_max = np.diff(log_means).max()
-    logging.info('Sharpest drop: {}'.format(self.drop_max))
+    self.drop_max = -1*np.diff(log_means).min()
+    logging.info('Sharpest_drop: {}'.format(self.drop_max))
     
-    if self.drop_max <= -1*math.log2(self.thresh_drop):
-      self.drop_time = times[np.diff(log_means).argmax()]
+    if self.drop_max >= math.log2(self.thresh_drop):
+      self.drop_time = bkp_times[np.diff(log_means).argmin()]
       self.found_dropoff = True
-      logging.info('Potential BH formation at time {}'.format(self.drop_time))
+      logging.info('BH_time: {}'.format(self.drop_time))
     
     logging.info('BH drop detected: {}'.format(self.found_dropoff))
       
