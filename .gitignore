@@ -3,3 +3,7 @@
 .python-version
 
 output/**
+
+#Spyder project files
+.project
+.spyproject
