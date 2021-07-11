@@ -52,7 +52,6 @@ class SharpDropoff(Node):
     #Minimum segment size for change point detection
     self.cpd.min_size = min(2, math.ceil(self.char_time/dt))
 
-#TODO: rescale input to a standard normalisation
     #find changepoint indices and prepend start point 0
     bkps = self.cpd.fit_predict(signal=log_vals, pen=self.cpd_penalty)
     bkps = np.concatenate(([0],bkps))
