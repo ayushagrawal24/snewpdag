@@ -1,31 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Mon Jul 12 00:15:00 2021
+Created on Mon Jul 12 2021
 
-@author: ayushagrawal
-"""
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Mon Jul 5 2021
+@author: ayushagrawal24
 
-@author: ayushagrawal
-
-SharpDropoff : Looks for a sharp drop in the signal, indicating a potential black hole. Currently assumes binned input data from a single experiment
+BH_Detector : Looks for a sharp drop in the signal, indicating a potential black hole. Currently assumes evenly binned input data from a single experiment
 
 Input Arguments:
     in_xfield: (string) name of field to extract from alert data containing time bins
     in_yfield: (string) name of field to extract from alert data containing neutrino detection counts
-    
-    [char_time]: (float, optional) characteristic time scale expected for the drop (in s)
-    [penalty]: (float, optional) Penalty (beta) parameter to use in PELT model
-    [thresh_drop]: (float, optional) Minimum required factor by which signal is required to drop 
-    
+        
 Output:
     has_drop: (bool) whether or not a sharp drop was detected
     drop_time: (float) Time bin at which the start of the sharpest drop is seen.
-    max_drop: (float) Sharpest drop value
 
 """
 
@@ -41,14 +29,14 @@ class BH_Detector(Node):
     self.tfield = in_xfield
     self.yfield = in_yfield
     
-    self.epsilon = kwargs.pop('epsilon',60)      
-    self.thresh_slope = kwargs.pop('threshold_slope', -400)
-    self.out_field = kwargs.pop('out_field', None)
+    # self.epsilon = kwargs.pop('epsilon',60)      
+    # self.thresh_slope = kwargs.pop('threshold_slope', -400)
     super().__init__(**kwargs)
     
     self.drop_time = None
     self.found_drop = False
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.INFO)   
+    
     
   def d2_edge_finder(self, times, vals, edge_type='falling'):
     #Smoothen curve with median filter
@@ -74,9 +62,9 @@ class BH_Detector(Node):
     logging.info(edge_ind)
       
     return edge_ind + 1
-    
-    
-  def canny_edge_detector(times, vals, strong_threshold = 95, weak_threshold = 80):
+  
+  
+  def canny_edge_detector(times, vals, strong_threshold = 95, weak_threshold = 90):
     #Smoothen curve with median filter
     smooth = scipy.ndimage.median_filter(vals, size=7)
 
@@ -105,7 +93,7 @@ class BH_Detector(Node):
     vals = data[self.yfield]
     
     #Find index of last falling edge
-    drop_ind = self.d2_edge_finder(times, vals)
+    drop_ind = self.d2_canny_edge_detector(times, vals)
     logging.info(drop_ind)
 
     if drop_ind.size == 0:
