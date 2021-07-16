@@ -10,6 +10,8 @@ BH_Detector : Looks for a sharp drop in the signal, indicating a potential black
 Input Arguments:
     in_xfield: (string) name of field to extract from alert data containing time bins
     in_yfield: (string) name of field to extract from alert data containing neutrino detection counts
+    
+    
         
 Output:
     has_drop: (bool) whether or not a sharp drop was detected
@@ -22,6 +24,9 @@ import numpy as np
 import scipy.ndimage
 from snewpdag.dag import Node
 
+import ruptures as rpt
+import math
+
 class BH_Detector(Node):
     
   #Constructor
@@ -29,13 +34,51 @@ class BH_Detector(Node):
     self.tfield = in_xfield
     self.yfield = in_yfield
     
-    # self.epsilon = kwargs.pop('epsilon',60)      
-    # self.thresh_slope = kwargs.pop('threshold_slope', -400)
-    super().__init__(**kwargs)
-    
+    #Canny params
+    self.epsilon = kwargs.pop('epsilon',60)      
+    self.thresh_slope = kwargs.pop('threshold_slope', -400)
+    #d2_edge_finder params
+    self.char_time = kwargs.pop('char_time',0.0002)
+    self.cpd_penalty = kwargs.pop('penalty',0.6)      
+    self.thresh_drop = kwargs.pop('threshold_drop', 1.7) 
+    self.cpd = rpt.KernelCPD(kernel='linear')
+        
     self.drop_time = None
     self.found_drop = False
     logging.basicConfig(level=logging.INFO)   
+    
+    super().__init__(**kwargs)
+    
+  def cpd_edge_finder(self, times, vals):
+    times = np.asarray(times)
+    dt = times[1]-times[0]
+    log_vals = np.log2(vals)
+
+    #Minimum segment size for change point detection
+    self.cpd.min_size = max(2, math.ceil(self.char_time/dt))
+    
+    #find changepoint indices and prepend start point 0
+    bkps = self.cpd.fit_predict(signal=log_vals, pen=self.cpd_penalty)
+    bkps = np.concatenate(([0],bkps))
+    bkp_times = times[bkps[:-1]]
+    logging.info('bkp_times: {}'.format(bkp_times))
+    
+    log_means = np.zeros(bkps.size-1)
+    std_dev = np.zeros(bkps.size-1)
+    for i in range(bkps.size-1):
+      log_means[i] = log_vals[bkps[i]:bkps[i+1]].mean()
+      std_dev[i] = np.exp2(log_vals[bkps[i]:bkps[i+1]]).std()
+      
+    logging.info('means: {}'.format(np.exp2(log_means)))
+    logging.info('std_dev: {}'.format(std_dev))
+      
+    self.drop_max = -1*np.diff(log_means).min()
+    logging.info('Sharpest_drop: {}'.format(self.drop_max))
+    
+    if self.drop_max >= math.log2(self.thresh_drop):
+      self.drop_time = bkp_times[np.diff(log_means).argmin()]
+      self.found_dropoff = True
+      logging.info('BH_time: {}'.format(self.drop_time))
     
     
   def d2_edge_finder(self, times, vals, edge_type='falling'):
